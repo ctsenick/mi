@@ -8,7 +8,7 @@ import { initDb } from './db.js';
 import apiRouter from './routes/api.js';
 import {
   createRoom, joinRoom, setReady, updateSettings,
-  startGame, submitVote, resolveResult, restartGame,
+  startGame, nextRound, submitVote, resolveResult, restartGame,
   setVoting, removePlayer, getRoomPlayers, getVotingPlayers,
 } from './gameManager.js';
 
@@ -21,6 +21,34 @@ app.use(express.json());
 app.use('/api', apiRouter);
 app.use(express.static(join(__dirname, '..', 'public')));
 app.get('*', (req, res) => res.sendFile(join(__dirname, '..', 'public', 'index.html')));
+
+// Per-room voting timeout handles — cleared when all players vote early
+const voteTimers = new Map();
+
+async function runRound(code, playerPayloads) {
+  for (let i = 3; i >= 1; i--) {
+    io.to(code).emit('countdown', { count: i });
+    await new Promise(r => setTimeout(r, 1000));
+  }
+
+  playerPayloads.forEach(({ socketId, previewUrl, startAt }) => {
+    io.to(socketId).emit('game_start', { previewUrl, startAt, duration: 30000 });
+  });
+
+  // After 30s music + 2s buffer → open voting
+  setTimeout(() => {
+    setVoting(code);
+    io.to(code).emit('start_voting', { players: getVotingPlayers(code) });
+
+    // 60s voting timeout → auto-resolve if not all voted yet
+    const timer = setTimeout(async () => {
+      voteTimers.delete(code);
+      const result = await resolveResult(code);
+      if (result) io.to(code).emit('reveal_result', result);
+    }, 60000);
+    voteTimers.set(code, timer);
+  }, 32000);
+}
 
 io.on('connection', (socket) => {
 
@@ -60,43 +88,31 @@ io.on('connection', (socket) => {
   socket.on('start_game', async ({ code }, callback) => {
     try {
       const { playerPayloads } = await startGame(code, socket.id);
-
-      // Countdown 3-2-1
-      for (let i = 3; i >= 1; i--) {
-        io.to(code).emit('countdown', { count: i });
-        await new Promise(r => setTimeout(r, 1000));
-      }
-
-      // Send each player their own preview_url
-      playerPayloads.forEach(({ socketId, previewUrl, startAt }) => {
-        io.to(socketId).emit('game_start', { previewUrl, startAt, duration: 30000 });
-      });
-
-      // After 30s music + 2s buffer → voting
-      setTimeout(() => {
-        setVoting(code);
-        io.to(code).emit('start_voting', { players: getVotingPlayers(code) });
-
-        // 60s voting timeout → auto-resolve
-        setTimeout(async () => {
-          const result = await resolveResult(code);
-          if (result) io.to(code).emit('reveal_result', result);
-        }, 60000);
-      }, 32000);
-
       callback?.({ ok: true });
+      await runRound(code, playerPayloads);
     } catch (err) {
       callback?.({ ok: false, error: err.message });
+    }
+  });
+
+  socket.on('next_round', async ({ code }) => {
+    try {
+      // Tell all clients to dismiss result overlay before countdown starts
+      io.to(code).emit('round_starting');
+      const { playerPayloads } = await nextRound(code, socket.id);
+      await runRound(code, playerPayloads);
+    } catch (err) {
+      console.error('next_round error:', err.message);
     }
   });
 
   socket.on('submit_vote', ({ code, targetPlayerId }) => {
     const result = submitVote(code, socket.id, targetPlayerId);
     if (!result) return;
-    io.to(code).emit('vote_update', {
-      votes: [...result.room.players.values()].map(p => ({ id: p.id, votes: p.votesReceived })),
-    });
     if (result.allVoted) {
+      // Cancel the 60s timer since everyone voted
+      const timer = voteTimers.get(code);
+      if (timer) { clearTimeout(timer); voteTimers.delete(code); }
       resolveResult(code).then(res => {
         if (res) io.to(code).emit('reveal_result', res);
       });
@@ -104,6 +120,8 @@ io.on('connection', (socket) => {
   });
 
   socket.on('restart_game', async ({ code }) => {
+    const timer = voteTimers.get(code);
+    if (timer) { clearTimeout(timer); voteTimers.delete(code); }
     await restartGame(code, socket.id);
     io.to(code).emit('go_to_lobby');
     io.to(code).emit('room_update', { players: getRoomPlayers(code), allReady: false });

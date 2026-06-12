@@ -16,10 +16,13 @@
   </div>
 
   <div id="result-overlay">
+    <div id="result-round" class="subtitle" style="font-size:0.85rem;margin-bottom:0.3rem;color:var(--text-dim);"></div>
     <div id="result-title" class="result-title"></div>
     <div id="result-eliminated" class="subtitle"></div>
+    <div id="result-songs" style="width:100%;max-width:400px;margin:0.8rem 0;"></div>
     <div id="result-players" class="result-players"></div>
-    <button class="btn btn-primary" id="btn-result-restart" style="display:none;max-width:320px;width:100%;">🔄 再玩一局</button>
+    <button class="btn btn-primary" id="btn-result-next-round" style="display:none;max-width:320px;width:100%;">▶ 下一局</button>
+    <button class="btn btn-primary" id="btn-result-restart" style="display:none;max-width:320px;width:100%;">🔄 再玩一次</button>
     <button class="btn btn-secondary" style="max-width:320px;width:100%;" onclick="location.reload()">🏠 回主頁</button>
   </div>
 
@@ -71,6 +74,14 @@
           <button class="counter-btn" id="btn-imposter-minus">−</button>
           <span class="counter-value" id="imposter-count-display">1</span>
           <button class="counter-btn" id="btn-imposter-plus">＋</button>
+        </div>
+      </div>
+      <div class="settings-row" style="margin-bottom:1rem;">
+        <span>局數</span>
+        <div style="display:flex;align-items:center;gap:0.8rem;">
+          <button class="counter-btn" id="btn-rounds-minus">−</button>
+          <span class="counter-value" id="rounds-display">1</span>
+          <button class="counter-btn" id="btn-rounds-plus">＋</button>
         </div>
       </div>
       <div style="margin-bottom:1rem;">

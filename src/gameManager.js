@@ -1,11 +1,78 @@
 import { pool } from './db.js';
 import crypto from 'crypto';
 
-// In-memory: roomCode -> { sessionId, hostSocketId, players: Map<socketId, player>, status, settings }
+// In-memory: roomCode -> { sessionId, hostSocketId, players: Map<socketId, player>, status, currentRound, civilianSong, imposterSong, settings }
 const rooms = new Map();
 
 function generateRoomCode() {
   return crypto.randomBytes(3).toString('hex').toUpperCase();
+}
+
+async function pickSongs() {
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const res = await pool.query(
+    `SELECT * FROM songs WHERE last_played IS NULL OR last_played < $1 ORDER BY RANDOM() LIMIT 20`,
+    [thirtyDaysAgo]
+  );
+  let songs = res.rows;
+
+  if (songs.length < 2) {
+    const fallback = await pool.query(`SELECT * FROM songs ORDER BY last_played NULLS FIRST LIMIT 20`);
+    songs = fallback.rows;
+  }
+  if (songs.length < 2) throw new Error('歌庫至少需要 2 首歌才能開始遊戲');
+
+  const civilian = songs[Math.floor(Math.random() * songs.length)];
+  const contrasts = songs.filter(
+    s => s.id !== civilian.id && Math.abs((s.energy ?? 0.5) - (civilian.energy ?? 0.5)) > 0.3
+  );
+  const imposterPool = contrasts.length > 0 ? contrasts : songs.filter(s => s.id !== civilian.id);
+  const imposter = imposterPool[Math.floor(Math.random() * imposterPool.length)];
+
+  return { civilian, imposter };
+}
+
+async function prepareRound(room, code) {
+  const { civilian, imposter } = await pickSongs();
+  const playerList = [...room.players.values()];
+  const shuffled = [...playerList].sort(() => Math.random() - 0.5);
+  const imposterCount = Math.min(room.settings.imposterCount, playerList.length - 1);
+
+  shuffled.forEach((p, i) => {
+    p.role = i < imposterCount ? 'imposter' : 'civilian';
+    p.isReady = false;
+    p.votesReceived = 0;
+    p.votedFor = undefined;
+  });
+
+  await pool.query(
+    `UPDATE game_sessions SET status='dancing', civilian_song_id=$1, imposter_song_id=$2 WHERE room_code=$3`,
+    [civilian.id, room.settings.imposterMode === 'silent' ? null : imposter.id, code]
+  );
+  await Promise.all(playerList.map(p =>
+    pool.query(`UPDATE players SET role=$1, is_ready=FALSE, votes_received=0 WHERE id=$2`, [p.role, p.id])
+  ));
+  await pool.query(
+    `UPDATE songs SET last_played=NOW() WHERE id=ANY($1::int[])`,
+    [[civilian.id, imposter?.id].filter(Boolean)]
+  );
+
+  room.civilianSong = { id: civilian.id, title: civilian.title, artist: civilian.artist };
+  room.imposterSong = room.settings.imposterMode === 'silent'
+    ? null
+    : { id: imposter.id, title: imposter.title, artist: imposter.artist };
+  room.status = 'dancing';
+
+  const startAt = Date.now() + 1500;
+  const playerPayloads = playerList.map(p => ({
+    socketId: p.socketId,
+    previewUrl: p.role === 'civilian'
+      ? civilian.preview_url
+      : (room.settings.imposterMode === 'silent' ? null : imposter.preview_url),
+    startAt,
+  }));
+
+  return { playerPayloads, playerList };
 }
 
 export async function createRoom(hostSocketId, hostName) {
@@ -29,7 +96,10 @@ export async function createRoom(hostSocketId, hostName) {
     sessionId, hostSocketId,
     players: new Map([[hostSocketId, host]]),
     status: 'waiting',
-    settings: { imposterCount: 1, imposterMode: 'song' },
+    currentRound: 0,
+    civilianSong: null,
+    imposterSong: null,
+    settings: { imposterCount: 1, imposterMode: 'song', totalRounds: 1 },
   });
 
   return { code, sessionId, player: host };
@@ -66,75 +136,23 @@ export function updateSettings(code, socketId, settings) {
   if (!room || room.hostSocketId !== socketId) return null;
   if (settings.imposterCount !== undefined) room.settings.imposterCount = Math.max(1, settings.imposterCount);
   if (settings.imposterMode !== undefined) room.settings.imposterMode = settings.imposterMode;
+  if (settings.totalRounds !== undefined) room.settings.totalRounds = Math.max(1, settings.totalRounds);
   return room;
-}
-
-async function pickSongs() {
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  const res = await pool.query(
-    `SELECT * FROM songs WHERE last_played IS NULL OR last_played < $1 ORDER BY RANDOM() LIMIT 20`,
-    [thirtyDaysAgo]
-  );
-  let songs = res.rows;
-
-  if (songs.length < 2) {
-    const fallback = await pool.query(`SELECT * FROM songs ORDER BY last_played NULLS FIRST LIMIT 20`);
-    songs = fallback.rows;
-  }
-  if (songs.length < 2) throw new Error('歌庫至少需要 2 首歌才能開始遊戲');
-
-  const civilian = songs[Math.floor(Math.random() * songs.length)];
-  const contrasts = songs.filter(
-    s => s.id !== civilian.id && Math.abs((s.energy ?? 0.5) - (civilian.energy ?? 0.5)) > 0.3
-  );
-  const imposterPool = contrasts.length > 0 ? contrasts : songs.filter(s => s.id !== civilian.id);
-  const imposter = imposterPool[Math.floor(Math.random() * imposterPool.length)];
-
-  return { civilian, imposter };
 }
 
 export async function startGame(code, socketId) {
   const room = rooms.get(code);
   if (!room || room.hostSocketId !== socketId) throw new Error('只有房主可以開始遊戲');
   if (room.players.size < 2) throw new Error('至少需要 2 位玩家');
+  room.currentRound = 1;
+  return prepareRound(room, code);
+}
 
-  const { civilian, imposter } = await pickSongs();
-
-  const playerList = [...room.players.values()];
-  const shuffled = [...playerList].sort(() => Math.random() - 0.5);
-  const imposterCount = Math.min(room.settings.imposterCount, playerList.length - 1);
-
-  shuffled.forEach((p, i) => {
-    p.role = i < imposterCount ? 'imposter' : 'civilian';
-    p.isReady = false;
-    p.votesReceived = 0;
-    p.votedFor = undefined;
-  });
-
-  await pool.query(
-    `UPDATE game_sessions SET status='dancing', civilian_song_id=$1, imposter_song_id=$2 WHERE room_code=$3`,
-    [civilian.id, room.settings.imposterMode === 'silent' ? null : imposter.id, code]
-  );
-  await Promise.all(playerList.map(p =>
-    pool.query(`UPDATE players SET role=$1, is_ready=FALSE, votes_received=0 WHERE id=$2`, [p.role, p.id])
-  ));
-  await pool.query(
-    `UPDATE songs SET last_played=NOW() WHERE id=ANY($1::int[])`,
-    [[civilian.id, imposter?.id].filter(Boolean)]
-  );
-
-  room.status = 'dancing';
-  const startAt = Date.now() + 1500;
-
-  const playerPayloads = playerList.map(p => ({
-    socketId: p.socketId,
-    previewUrl: p.role === 'civilian'
-      ? civilian.preview_url
-      : (room.settings.imposterMode === 'silent' ? null : imposter.preview_url),
-    startAt,
-  }));
-
-  return { playerPayloads, playerList };
+export async function nextRound(code, socketId) {
+  const room = rooms.get(code);
+  if (!room || room.hostSocketId !== socketId) throw new Error('只有房主可以繼續');
+  room.currentRound += 1;
+  return prepareRound(room, code);
 }
 
 export function setVoting(code) {
@@ -169,7 +187,7 @@ export function submitVote(code, voterSocketId, targetPlayerId) {
 
 export async function resolveResult(code) {
   const room = rooms.get(code);
-  if (!room) return null;
+  if (!room || room.status !== 'voting') return null;
 
   const playerList = [...room.players.values()];
   const maxVotes = Math.max(...playerList.map(p => p.votesReceived));
@@ -184,6 +202,17 @@ export async function resolveResult(code) {
     eliminated: { id: eliminated.id, name: eliminated.name, role: eliminated.role },
     players: playerList.map(p => ({ id: p.id, name: p.name, role: p.role, votesReceived: p.votesReceived })),
     civilianWin,
+    currentRound: room.currentRound,
+    totalRounds: room.settings.totalRounds,
+    songs: {
+      civilian: room.civilianSong
+        ? { title: room.civilianSong.title, artist: room.civilianSong.artist }
+        : null,
+      imposter: room.settings.imposterMode === 'silent'
+        ? { title: '（無音樂）', artist: '臥底沉默模式' }
+        : (room.imposterSong ? { title: room.imposterSong.title, artist: room.imposterSong.artist } : null),
+      imposterMode: room.settings.imposterMode,
+    },
   };
 }
 
@@ -191,6 +220,7 @@ export async function restartGame(code, socketId) {
   const room = rooms.get(code);
   if (!room || room.hostSocketId !== socketId) return null;
   room.status = 'waiting';
+  room.currentRound = 0;
   room.players.forEach(p => {
     p.isReady = false;
     p.role = null;

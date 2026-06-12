@@ -5,6 +5,7 @@ const state = {
   isHost: false,
   imposterCount: 1,
   imposterMode: 'song',
+  totalRounds: 1,
   audioCtx: null,
   analyser: null,
   library: [],
@@ -63,14 +64,18 @@ function initSocket() {
     startVoteTimer(60);
   });
 
-  state.socket.on('vote_update', ({ votes }) => {
-    votes.forEach(({ id, votes: count }) => {
-      const el = document.getElementById(`votes-${id}`);
-      if (el) el.textContent = `${count} 票`;
-    });
-  });
+  // vote_update intentionally not handled — vote counts are hidden during voting
 
   state.socket.on('reveal_result', (result) => showResult(result));
+
+  state.socket.on('round_starting', () => {
+    document.getElementById('result-overlay').classList.remove('active');
+    clearInterval(voteTimerInterval);
+    const confirmBtn = document.getElementById('btn-confirm-vote');
+    confirmBtn.style.display = 'none';
+    confirmBtn.disabled = false;
+    document.getElementById('vote-msg').textContent = '';
+  });
 
   state.socket.on('go_to_lobby', () => {
     document.getElementById('result-overlay').classList.remove('active');
@@ -174,6 +179,18 @@ document.getElementById('btn-imposter-plus').addEventListener('click', () => {
   state.socket.emit('update_settings', { code: state.roomCode, settings: { imposterCount: state.imposterCount } });
 });
 
+document.getElementById('btn-rounds-minus').addEventListener('click', () => {
+  state.totalRounds = Math.max(1, state.totalRounds - 1);
+  document.getElementById('rounds-display').textContent = state.totalRounds;
+  state.socket.emit('update_settings', { code: state.roomCode, settings: { totalRounds: state.totalRounds } });
+});
+
+document.getElementById('btn-rounds-plus').addEventListener('click', () => {
+  state.totalRounds += 1;
+  document.getElementById('rounds-display').textContent = state.totalRounds;
+  state.socket.emit('update_settings', { code: state.roomCode, settings: { totalRounds: state.totalRounds } });
+});
+
 document.getElementById('mode-song').addEventListener('click', () => setMode('song'));
 document.getElementById('mode-silent').addEventListener('click', () => setMode('silent'));
 
@@ -250,6 +267,13 @@ async function searchSongs() {
 
 // ── Audio & Visualizer ────────────────────────────────────────────────────
 async function startAudio(previewUrl, startAt, duration) {
+  // Clean up previous round's audio context
+  if (state.audioCtx) {
+    state.audioCtx.close().catch(() => {});
+    state.audioCtx = null;
+    state.analyser = null;
+  }
+
   const delay = Math.max(0, startAt - Date.now());
 
   if (previewUrl) {
@@ -277,16 +301,19 @@ async function startAudio(previewUrl, startAt, duration) {
   setTimeout(() => startDanceTimer(duration / 1000), delay);
 }
 
+let danceTimerInterval = null;
+
 function startDanceTimer(totalSeconds) {
+  if (danceTimerInterval) clearInterval(danceTimerInterval);
   let remaining = totalSeconds;
   const bar = document.getElementById('dance-progress');
   const label = document.getElementById('dance-timer');
   bar.style.width = '100%';
-  const interval = setInterval(() => {
+  danceTimerInterval = setInterval(() => {
     remaining--;
     label.textContent = remaining;
     bar.style.width = `${(remaining / totalSeconds) * 100}%`;
-    if (remaining <= 0) clearInterval(interval);
+    if (remaining <= 0) clearInterval(danceTimerInterval);
   }, 1000);
 }
 
@@ -330,7 +357,6 @@ function renderVoteGrid(players) {
     <div class="vote-card ${p.id === state.playerId ? 'self' : ''}" data-id="${p.id}">
       <div class="player-avatar">${p.name[0].toUpperCase()}</div>
       <span class="vote-name">${p.name}${p.id === state.playerId ? ' (你)' : ''}</span>
-      <span class="vote-count" id="votes-${p.id}">0 票</span>
     </div>
   `).join('');
 
@@ -363,15 +389,39 @@ document.getElementById('btn-confirm-vote').addEventListener('click', () => {
 });
 
 // ── Result ────────────────────────────────────────────────────────────────
-function showResult({ eliminated, players, civilianWin }) {
+function showResult({ eliminated, players, civilianWin, currentRound, totalRounds, songs }) {
   clearInterval(voteTimerInterval);
   const overlay = document.getElementById('result-overlay');
   overlay.classList.add('active');
+
+  // Round indicator
+  document.getElementById('result-round').textContent =
+    totalRounds > 1 ? `第 ${currentRound} / ${totalRounds} 局` : '';
+
   const title = document.getElementById('result-title');
   title.textContent = civilianWin ? '🎉 平民勝利！' : '🕵️ 臥底勝利！';
   title.style.color = civilianWin ? 'var(--accent)' : 'var(--accent2)';
+
   document.getElementById('result-eliminated').textContent =
     `被淘汰：${eliminated.name}（${eliminated.role === 'imposter' ? '果然是臥底！' : '是平民...'}）`;
+
+  // Song reveal
+  if (songs) {
+    document.getElementById('result-songs').innerHTML = `
+      <div class="songs-reveal">
+        <div class="song-row">
+          <span class="song-label">👥 平民聽</span>
+          <span class="song-info">${songs.civilian?.title ?? '—'} — ${songs.civilian?.artist ?? '—'}</span>
+        </div>
+        <div class="song-row">
+          <span class="song-label">🕵️ 臥底聽</span>
+          <span class="song-info">${songs.imposter?.title ?? '—'} — ${songs.imposter?.artist ?? '—'}</span>
+        </div>
+      </div>
+    `;
+  }
+
+  // Players with roles + vote counts
   document.getElementById('result-players').innerHTML = players.map(p => `
     <div class="result-player-row">
       <span>${p.name}</span>
@@ -379,10 +429,28 @@ function showResult({ eliminated, players, civilianWin }) {
       <span style="color:var(--text-dim);font-size:0.85rem;">${p.votesReceived} 票</span>
     </div>
   `).join('');
+
+  // Buttons — only host controls flow
+  const nextRoundBtn = document.getElementById('btn-result-next-round');
+  const restartBtn = document.getElementById('btn-result-restart');
+
+  nextRoundBtn.style.display = 'none';
+  restartBtn.style.display = 'none';
+
   if (state.isHost) {
-    const btn = document.getElementById('btn-result-restart');
-    btn.style.display = 'flex';
-    btn.onclick = () => { state.socket.emit('restart_game', { code: state.roomCode }); };
+    const hasMoreRounds = currentRound < totalRounds;
+    if (hasMoreRounds) {
+      nextRoundBtn.style.display = 'flex';
+      nextRoundBtn.textContent = `▶ 下一局（${currentRound + 1}/${totalRounds}）`;
+      nextRoundBtn.disabled = false;
+      nextRoundBtn.onclick = () => {
+        nextRoundBtn.disabled = true;
+        state.socket.emit('next_round', { code: state.roomCode });
+      };
+    } else {
+      restartBtn.style.display = 'flex';
+      restartBtn.onclick = () => { state.socket.emit('restart_game', { code: state.roomCode }); };
+    }
   }
 }
 

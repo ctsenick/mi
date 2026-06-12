@@ -98,3 +98,8 @@ h3 { font-size: 1.1rem; font-weight: 600; }
 .divider { border: none; border-top: 1px solid #333; margin: 0.5rem 0; }
 .label-sm { font-size: 0.78rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
 .error-msg { color: #ef4444; font-size: 0.85rem; }
+
+.songs-reveal { background: var(--surface); border-radius: var(--radius); padding: 1rem 1.2rem; display: flex; flex-direction: column; gap: 0.6rem; width: 100%; text-align: left; }
+.song-row { display: flex; flex-direction: column; gap: 0.15rem; }
+.song-label { font-size: 0.78rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+.song-info { font-size: 0.9rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

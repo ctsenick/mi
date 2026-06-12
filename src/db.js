@@ -45,5 +45,10 @@ export async function initDb() {
       created_at      TIMESTAMP DEFAULT NOW()
     );
   `);
+  // Safe migrations — add new columns without dropping existing data
+  await pool.query(`
+    ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS total_rounds INT DEFAULT 1;
+    ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS current_round INT DEFAULT 1;
+  `);
   console.log('Database initialized');
 }
