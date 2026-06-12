@@ -82,13 +82,13 @@ async function prepareRound(room, code) {
     : { id: imposter.id, title: imposter.title, artist: imposter.artist };
   room.status = 'dancing';
 
-  const startAt = Date.now() + 1500;
+  // startAt is NOT set here — server sets it after the countdown so clients
+  // have enough time to fetch + decode the audio before playback begins.
   const playerPayloads = playerList.map(p => ({
     socketId: p.socketId,
     previewUrl: p.role === 'civilian'
       ? civilian.preview_url
       : (room.settings.imposterMode === 'silent' ? null : imposter.preview_url),
-    startAt,
   }));
 
   return { playerPayloads, playerList };

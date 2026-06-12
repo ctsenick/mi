@@ -8,14 +8,38 @@ const state = {
   totalRounds: 1,
   category: 'random',
   customSongIds: [],
+  // Audio — single AudioContext reused across all rounds (iOS requires this)
   audioCtx: null,
   analyser: null,
+  currentSource: null,
   library: [],
 };
 
 const CAT_LABELS = { western: '西洋', japanese: '日文', korean: '韓文', chinese: '中文', uncategorized: '？' };
 
 function catLabel(cat) { return CAT_LABELS[cat] ?? '？'; }
+
+// Must be called inside a user-gesture handler (button click).
+// Creates or resumes the shared AudioContext, plays a silent frame to
+// satisfy iOS Safari's autoplay policy for the rest of the session.
+async function ensureAudioCtxUnlocked() {
+  if (state.audioCtx) {
+    if (state.audioCtx.state === 'suspended') {
+      try { await state.audioCtx.resume(); } catch (_) {}
+    }
+    return;
+  }
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const buf = ctx.createBuffer(1, 1, 22050);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  src.connect(ctx.destination);
+  src.start(0);
+  if (ctx.state === 'suspended') {
+    try { await ctx.resume(); } catch (_) {}
+  }
+  state.audioCtx = ctx;
+}
 
 function showScreen(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
@@ -77,6 +101,10 @@ function initSocket() {
   state.socket.on('round_starting', () => {
     document.getElementById('result-overlay').classList.remove('active');
     clearInterval(voteTimerInterval);
+    if (state.currentSource) {
+      try { state.currentSource.stop(); } catch (_) {}
+      state.currentSource = null;
+    }
     const confirmBtn = document.getElementById('btn-confirm-vote');
     confirmBtn.style.display = 'none';
     confirmBtn.disabled = false;
@@ -95,9 +123,10 @@ function initSocket() {
 }
 
 // ── Lobby ─────────────────────────────────────────────────────────────────
-document.getElementById('btn-create').addEventListener('click', () => {
+document.getElementById('btn-create').addEventListener('click', async () => {
   const name = document.getElementById('create-name').value.trim();
   if (!name) return showError('create-error', '請輸入名字');
+  await ensureAudioCtxUnlocked();
   if (!state.socket) initSocket();
   state.socket.emit('create_room', { name }, ({ ok, code, playerId, error }) => {
     if (!ok) return showError('create-error', error);
@@ -108,11 +137,12 @@ document.getElementById('btn-create').addEventListener('click', () => {
   });
 });
 
-document.getElementById('btn-join').addEventListener('click', () => {
+document.getElementById('btn-join').addEventListener('click', async () => {
   const name = document.getElementById('join-name').value.trim();
   const code = document.getElementById('join-code').value.trim().toUpperCase();
   if (!name) return showError('join-error', '請輸入名字');
   if (code.length !== 6) return showError('join-error', '請輸入 6 碼房號');
+  await ensureAudioCtxUnlocked();
   if (!state.socket) initSocket();
   state.socket.emit('join_room', { code, name }, ({ ok, playerId, error }) => {
     if (!ok) return showError('join-error', error);
@@ -152,7 +182,8 @@ function renderPlayerList(players) {
   `).join('');
 }
 
-document.getElementById('btn-ready').addEventListener('click', () => {
+document.getElementById('btn-ready').addEventListener('click', async () => {
+  await ensureAudioCtxUnlocked();
   state.socket.emit('player_ready', { code: state.roomCode });
   const btn = document.getElementById('btn-ready');
   btn.disabled = true;
@@ -311,36 +342,62 @@ async function searchSongs() {
 
 // ── Audio & Visualizer ────────────────────────────────────────────────────
 async function startAudio(previewUrl, startAt, duration) {
-  if (state.audioCtx) {
-    state.audioCtx.close().catch(() => {});
-    state.audioCtx = null;
-    state.analyser = null;
+  // Stop previous source but KEEP the AudioContext alive across rounds.
+  // On iOS, creating a new AudioContext requires another user gesture.
+  if (state.currentSource) {
+    try { state.currentSource.stop(); } catch (_) {}
+    state.currentSource = null;
+  }
+  state.analyser = null;
+
+  // Schedule the dance timer based on the original startAt so it's in sync
+  // even if audio fetch takes a few hundred ms.
+  const initialDelayMs = Math.max(0, startAt - Date.now());
+  setTimeout(() => startDanceTimer(duration / 1000), initialDelayMs);
+
+  const ctx = state.audioCtx;
+  if (!ctx) {
+    // AudioContext wasn't unlocked — silent fallback
+    setTimeout(() => startVisualizer(true), initialDelayMs);
+    return;
   }
 
-  const delay = Math.max(0, startAt - Date.now());
+  if (ctx.state === 'suspended') {
+    try { await ctx.resume(); } catch (_) {}
+  }
 
-  if (previewUrl) {
-    const audio = new Audio(previewUrl);
-    audio.crossOrigin = 'anonymous';
-    audio.preload = 'auto';
+  if (!previewUrl) {
+    setTimeout(() => startVisualizer(true), initialDelayMs);
+    return;
+  }
 
-    state.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    state.analyser = state.audioCtx.createAnalyser();
+  try {
+    // Fetch and decode audio as ArrayBuffer — this is the iOS-compatible path.
+    // HTMLAudioElement.play() requires a user gesture in a setTimeout on iOS;
+    // AudioBufferSourceNode.start() does not, as long as the AudioContext was
+    // already unlocked by a prior user gesture (done in join/ready handlers).
+    const resp = await fetch(previewUrl);
+    const arrayBuf = await resp.arrayBuffer();
+    const audioBuf = await ctx.decodeAudioData(arrayBuf);
+
+    state.analyser = ctx.createAnalyser();
     state.analyser.fftSize = 128;
-    const source = state.audioCtx.createMediaElementSource(audio);
+
+    const source = ctx.createBufferSource();
+    source.buffer = audioBuf;
     source.connect(state.analyser);
-    state.analyser.connect(state.audioCtx.destination);
+    state.analyser.connect(ctx.destination);
 
-    await new Promise(r => { audio.oncanplaythrough = r; audio.onerror = r; });
-    setTimeout(() => {
-      audio.play().catch(() => {});
-      startVisualizer(false);
-    }, delay);
-  } else {
-    setTimeout(() => startVisualizer(true), delay);
+    // Recalculate remaining delay after fetch + decode time
+    const remainingS = Math.max(0, (startAt - Date.now()) / 1000);
+    source.start(ctx.currentTime + remainingS);
+    state.currentSource = source;
+
+    setTimeout(() => startVisualizer(false), remainingS * 1000);
+  } catch (err) {
+    console.error('Audio error:', err);
+    setTimeout(() => startVisualizer(true), Math.max(0, startAt - Date.now()));
   }
-
-  setTimeout(() => startDanceTimer(duration / 1000), delay);
 }
 
 let danceTimerInterval = null;

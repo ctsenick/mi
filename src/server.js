@@ -34,7 +34,11 @@ async function runRound(code, playerPayloads) {
     await new Promise(r => setTimeout(r, 1000));
   }
 
-  playerPayloads.forEach(({ socketId, previewUrl, startAt }) => {
+  // Set startAt AFTER the countdown so clients have ~3s to fetch + decode
+  // audio before playback begins (required for iOS Web Audio API flow).
+  const startAt = Date.now() + 3000;
+
+  playerPayloads.forEach(({ socketId, previewUrl }) => {
     io.to(socketId).emit('game_start', { previewUrl, startAt, duration: 30000 });
   });
 
