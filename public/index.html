@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <meta name="theme-color" content="#1A1A1A" />
+  <title>音樂臥底舞王</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<div id="app">
+
+  <div id="countdown-overlay">
+    <div id="countdown-number" class="countdown-number">3</div>
+    <div class="subtitle">準備跳舞！</div>
+  </div>
+
+  <div id="result-overlay">
+    <div id="result-title" class="result-title"></div>
+    <div id="result-eliminated" class="subtitle"></div>
+    <div id="result-players" class="result-players"></div>
+    <button class="btn btn-primary" id="btn-result-restart" style="display:none;max-width:320px;width:100%;">🔄 再玩一局</button>
+    <button class="btn btn-secondary" style="max-width:320px;width:100%;" onclick="location.reload()">🏠 回主頁</button>
+  </div>
+
+  <!-- Screen 1: Lobby -->
+  <div id="screen-lobby" class="screen active">
+    <div class="text-center" style="margin-top:2rem;">
+      <h1>🕺 <span class="accent">臥底</span><br>舞王</h1>
+      <p class="subtitle" style="margin-top:0.5rem;">Music Imposter: Dance Off</p>
+    </div>
+    <div class="card" style="margin-top:1rem;">
+      <h3 style="margin-bottom:0.8rem;">創建房間</h3>
+      <input class="input" id="create-name" placeholder="你的名字" maxlength="12" />
+      <div style="margin-top:0.8rem;"><button class="btn btn-primary" id="btn-create">🎵 創建房間</button></div>
+      <div id="create-error" class="error-msg" style="margin-top:0.5rem;"></div>
+    </div>
+    <div class="card">
+      <h3 style="margin-bottom:0.8rem;">加入房間</h3>
+      <input class="input" id="join-name" placeholder="你的名字" maxlength="12" />
+      <input class="input" id="join-code" placeholder="房號（6 碼）" maxlength="6" style="margin-top:0.8rem;text-transform:uppercase;letter-spacing:0.2em;font-weight:700;" />
+      <div style="margin-top:0.8rem;"><button class="btn btn-secondary" id="btn-join">🚪 加入</button></div>
+      <div id="join-error" class="error-msg" style="margin-top:0.5rem;"></div>
+    </div>
+    <div class="card" style="font-size:0.85rem;color:var(--text-dim);line-height:1.7;">
+      <div style="font-weight:700;color:var(--text);margin-bottom:0.5rem;">🎮 怎麼玩？</div>
+      大家各持手機 → 同步播放音樂 → 跟著律動跳舞<br>
+      音樂結束後投票找出聽不同歌（或沒聽音樂）的臥底！
+    </div>
+  </div>
+
+  <!-- Screen 2: Sync Room -->
+  <div id="screen-room" class="screen">
+    <div class="text-center">
+      <div class="label-sm">房號</div>
+      <div class="room-code" id="room-code-display">------</div>
+      <img id="qr-code" style="width:120px;height:120px;margin:0.5rem auto;display:block;border-radius:8px;" alt="QR Code" />
+    </div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.8rem;">
+        <h3>玩家列表</h3>
+        <span id="player-count" class="subtitle">0 人</span>
+      </div>
+      <div class="player-list" id="player-list"></div>
+    </div>
+    <div id="host-settings" class="card" style="display:none;">
+      <h3 style="margin-bottom:1rem;">⚙️ 遊戲設定</h3>
+      <div class="settings-row" style="margin-bottom:1rem;">
+        <span>臥底人數</span>
+        <div style="display:flex;align-items:center;gap:0.8rem;">
+          <button class="counter-btn" id="btn-imposter-minus">−</button>
+          <span class="counter-value" id="imposter-count-display">1</span>
+          <button class="counter-btn" id="btn-imposter-plus">＋</button>
+        </div>
+      </div>
+      <div style="margin-bottom:1rem;">
+        <div class="label-sm" style="margin-bottom:0.4rem;">臥底模式</div>
+        <div class="toggle-group">
+          <button class="toggle-btn active" id="mode-song" data-mode="song">🎵 聽不同歌</button>
+          <button class="toggle-btn" id="mode-silent" data-mode="silent">🔇 完全靜音</button>
+        </div>
+      </div>
+      <hr class="divider" />
+      <div>
+        <div class="label-sm" style="margin-bottom:0.5rem;">🎵 歌單管理</div>
+        <div style="display:flex;gap:0.5rem;margin-bottom:0.5rem;">
+          <input class="input" id="song-search-input" placeholder="搜尋歌曲…" style="flex:1;" />
+          <button class="btn btn-primary" id="btn-song-search" style="width:auto;padding:0 1rem;">搜尋</button>
+        </div>
+        <div class="search-results" id="search-results"></div>
+        <div id="search-msg" class="subtitle" style="font-size:0.8rem;margin-top:0.3rem;"></div>
+      </div>
+      <hr class="divider" />
+      <div>
+        <div class="label-sm" style="margin-bottom:0.5rem;">歌庫（<span id="library-count">0</span> 首）</div>
+        <div class="library-list" id="library-list"></div>
+        <div id="library-msg" class="error-msg" style="margin-top:0.3rem;font-size:0.8rem;"></div>
+      </div>
+    </div>
+    <button class="btn btn-primary" id="btn-ready">✅ 準備</button>
+    <button class="btn btn-primary" id="btn-start-game" style="display:none;background:#22c55e;">🚀 開始遊戲！</button>
+    <div id="room-msg" class="subtitle text-center" style="font-size:0.85rem;"></div>
+  </div>
+
+  <!-- Screen 3: Dance -->
+  <div id="screen-dance" class="screen">
+    <div class="dance-text accent">DANCE<br>NOW!</div>
+    <div class="visualizer-container">
+      <canvas id="visualizer"></canvas>
+    </div>
+    <div class="card text-center">
+      <div class="time-label" id="dance-timer">30</div>
+      <div class="progress-bar-wrap" style="margin-top:0.5rem;">
+        <div class="progress-bar" id="dance-progress" style="width:100%;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Screen 4: Vote -->
+  <div id="screen-vote" class="screen">
+    <div class="text-center">
+      <h2>🗳️ 投票時間</h2>
+      <p class="subtitle" id="vote-timer-label">誰是臥底？（剩餘 60 秒）</p>
+    </div>
+    <div class="vote-grid" id="vote-grid"></div>
+    <button class="btn btn-danger" id="btn-confirm-vote" style="display:none;">確認投票</button>
+    <div id="vote-msg" class="subtitle text-center" style="font-size:0.85rem;"></div>
+  </div>
+
+</div>
+<script src="/socket.io/socket.io.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

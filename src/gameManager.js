@@ -1,0 +1,230 @@
+import { pool } from './db.js';
+import crypto from 'crypto';
+
+// In-memory: roomCode -> { sessionId, hostSocketId, players: Map<socketId, player>, status, settings }
+const rooms = new Map();
+
+function generateRoomCode() {
+  return crypto.randomBytes(3).toString('hex').toUpperCase();
+}
+
+export async function createRoom(hostSocketId, hostName) {
+  const code = generateRoomCode();
+  const result = await pool.query(
+    `INSERT INTO game_sessions (room_code, host_socket_id) VALUES ($1, $2) RETURNING id`,
+    [code, hostSocketId]
+  );
+  const sessionId = result.rows[0].id;
+
+  const playerResult = await pool.query(
+    `INSERT INTO players (session_id, name, socket_id) VALUES ($1, $2, $3) RETURNING id`,
+    [sessionId, hostName, hostSocketId]
+  );
+  const host = {
+    id: playerResult.rows[0].id, name: hostName, socketId: hostSocketId,
+    isReady: false, role: null, votesReceived: 0, votedFor: undefined,
+  };
+
+  rooms.set(code, {
+    sessionId, hostSocketId,
+    players: new Map([[hostSocketId, host]]),
+    status: 'waiting',
+    settings: { imposterCount: 1, imposterMode: 'song' },
+  });
+
+  return { code, sessionId, player: host };
+}
+
+export async function joinRoom(code, socketId, playerName) {
+  const room = rooms.get(code);
+  if (!room) throw new Error('找不到房間');
+  if (room.status !== 'waiting') throw new Error('遊戲已開始');
+
+  const playerResult = await pool.query(
+    `INSERT INTO players (session_id, name, socket_id) VALUES ($1, $2, $3) RETURNING id`,
+    [room.sessionId, playerName, socketId]
+  );
+  const player = {
+    id: playerResult.rows[0].id, name: playerName, socketId,
+    isReady: false, role: null, votesReceived: 0, votedFor: undefined,
+  };
+  room.players.set(socketId, player);
+  return { room, player };
+}
+
+export function setReady(code, socketId) {
+  const room = rooms.get(code);
+  if (!room) return null;
+  const player = room.players.get(socketId);
+  if (player) player.isReady = true;
+  const allReady = [...room.players.values()].every(p => p.isReady);
+  return { room, allReady };
+}
+
+export function updateSettings(code, socketId, settings) {
+  const room = rooms.get(code);
+  if (!room || room.hostSocketId !== socketId) return null;
+  if (settings.imposterCount !== undefined) room.settings.imposterCount = Math.max(1, settings.imposterCount);
+  if (settings.imposterMode !== undefined) room.settings.imposterMode = settings.imposterMode;
+  return room;
+}
+
+async function pickSongs() {
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const res = await pool.query(
+    `SELECT * FROM songs WHERE last_played IS NULL OR last_played < $1 ORDER BY RANDOM() LIMIT 20`,
+    [thirtyDaysAgo]
+  );
+  let songs = res.rows;
+
+  if (songs.length < 2) {
+    const fallback = await pool.query(`SELECT * FROM songs ORDER BY last_played NULLS FIRST LIMIT 20`);
+    songs = fallback.rows;
+  }
+  if (songs.length < 2) throw new Error('歌庫至少需要 2 首歌才能開始遊戲');
+
+  const civilian = songs[Math.floor(Math.random() * songs.length)];
+  const contrasts = songs.filter(
+    s => s.id !== civilian.id && Math.abs((s.energy ?? 0.5) - (civilian.energy ?? 0.5)) > 0.3
+  );
+  const imposterPool = contrasts.length > 0 ? contrasts : songs.filter(s => s.id !== civilian.id);
+  const imposter = imposterPool[Math.floor(Math.random() * imposterPool.length)];
+
+  return { civilian, imposter };
+}
+
+export async function startGame(code, socketId) {
+  const room = rooms.get(code);
+  if (!room || room.hostSocketId !== socketId) throw new Error('只有房主可以開始遊戲');
+  if (room.players.size < 2) throw new Error('至少需要 2 位玩家');
+
+  const { civilian, imposter } = await pickSongs();
+
+  const playerList = [...room.players.values()];
+  const shuffled = [...playerList].sort(() => Math.random() - 0.5);
+  const imposterCount = Math.min(room.settings.imposterCount, playerList.length - 1);
+
+  shuffled.forEach((p, i) => {
+    p.role = i < imposterCount ? 'imposter' : 'civilian';
+    p.isReady = false;
+    p.votesReceived = 0;
+    p.votedFor = undefined;
+  });
+
+  await pool.query(
+    `UPDATE game_sessions SET status='dancing', civilian_song_id=$1, imposter_song_id=$2 WHERE room_code=$3`,
+    [civilian.id, room.settings.imposterMode === 'silent' ? null : imposter.id, code]
+  );
+  await Promise.all(playerList.map(p =>
+    pool.query(`UPDATE players SET role=$1, is_ready=FALSE, votes_received=0 WHERE id=$2`, [p.role, p.id])
+  ));
+  await pool.query(
+    `UPDATE songs SET last_played=NOW() WHERE id=ANY($1::int[])`,
+    [[civilian.id, imposter?.id].filter(Boolean)]
+  );
+
+  room.status = 'dancing';
+  const startAt = Date.now() + 1500;
+
+  const playerPayloads = playerList.map(p => ({
+    socketId: p.socketId,
+    previewUrl: p.role === 'civilian'
+      ? civilian.preview_url
+      : (room.settings.imposterMode === 'silent' ? null : imposter.preview_url),
+    startAt,
+  }));
+
+  return { playerPayloads, playerList };
+}
+
+export function setVoting(code) {
+  const room = rooms.get(code);
+  if (room) room.status = 'voting';
+}
+
+export function getVotingPlayers(code) {
+  const room = rooms.get(code);
+  if (!room) return [];
+  return [...room.players.values()].map(p => ({ id: p.id, name: p.name }));
+}
+
+export function submitVote(code, voterSocketId, targetPlayerId) {
+  const room = rooms.get(code);
+  if (!room || room.status !== 'voting') return null;
+  const voter = room.players.get(voterSocketId);
+  if (!voter) return null;
+
+  if (voter.votedFor) {
+    const prev = [...room.players.values()].find(p => p.id === voter.votedFor);
+    if (prev) prev.votesReceived = Math.max(0, prev.votesReceived - 1);
+  }
+
+  voter.votedFor = targetPlayerId;
+  const target = [...room.players.values()].find(p => p.id === targetPlayerId);
+  if (target) target.votesReceived++;
+
+  const allVoted = [...room.players.values()].every(p => p.votedFor != null);
+  return { room, allVoted };
+}
+
+export async function resolveResult(code) {
+  const room = rooms.get(code);
+  if (!room) return null;
+
+  const playerList = [...room.players.values()];
+  const maxVotes = Math.max(...playerList.map(p => p.votesReceived));
+  const candidates = playerList.filter(p => p.votesReceived === maxVotes);
+  const eliminated = candidates[Math.floor(Math.random() * candidates.length)];
+
+  const civilianWin = eliminated.role === 'imposter';
+  room.status = 'ended';
+  await pool.query(`UPDATE game_sessions SET status='ended' WHERE room_code=$1`, [code]);
+
+  return {
+    eliminated: { id: eliminated.id, name: eliminated.name, role: eliminated.role },
+    players: playerList.map(p => ({ id: p.id, name: p.name, role: p.role, votesReceived: p.votesReceived })),
+    civilianWin,
+  };
+}
+
+export async function restartGame(code, socketId) {
+  const room = rooms.get(code);
+  if (!room || room.hostSocketId !== socketId) return null;
+  room.status = 'waiting';
+  room.players.forEach(p => {
+    p.isReady = false;
+    p.role = null;
+    p.votesReceived = 0;
+    p.votedFor = undefined;
+  });
+  await pool.query(
+    `UPDATE game_sessions SET status='waiting', civilian_song_id=NULL, imposter_song_id=NULL WHERE room_code=$1`,
+    [code]
+  );
+  return room;
+}
+
+export function getRoomBySocket(socketId) {
+  for (const [code, room] of rooms) {
+    if (room.players.has(socketId)) return { code, room };
+  }
+  return null;
+}
+
+export function removePlayer(socketId) {
+  const result = getRoomBySocket(socketId);
+  if (!result) return null;
+  const { code, room } = result;
+  room.players.delete(socketId);
+  if (room.players.size === 0) rooms.delete(code);
+  return result;
+}
+
+export function getRoomPlayers(code) {
+  const room = rooms.get(code);
+  if (!room) return [];
+  return [...room.players.values()].map(p => ({
+    id: p.id, name: p.name, isReady: p.isReady,
+    isHost: p.socketId === room.hostSocketId,
+  }));
+}
