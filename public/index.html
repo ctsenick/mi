@@ -91,6 +91,21 @@
           <button class="toggle-btn" id="mode-silent" data-mode="silent">🔇 完全靜音</button>
         </div>
       </div>
+      <div style="margin-bottom:1rem;">
+        <div class="label-sm" style="margin-bottom:0.4rem;">歌曲分類</div>
+        <div class="category-grid" id="category-grid">
+          <button class="cat-mode-btn active" data-cat="random">🎲 隨機</button>
+          <button class="cat-mode-btn" data-cat="western">🌍 西洋</button>
+          <button class="cat-mode-btn" data-cat="japanese">🇯🇵 日文</button>
+          <button class="cat-mode-btn" data-cat="korean">🇰🇷 韓文</button>
+          <button class="cat-mode-btn" data-cat="chinese">🇨🇳 中文</button>
+          <button class="cat-mode-btn" data-cat="custom">✏️ 自訂</button>
+        </div>
+      </div>
+      <div id="custom-songs-panel" style="display:none;margin-bottom:1rem;">
+        <div class="label-sm" style="margin-bottom:0.4rem;">自訂歌曲（至少選 2 首）</div>
+        <div id="custom-songs-list" class="custom-songs-list"></div>
+      </div>
       <hr class="divider" />
       <div>
         <div class="label-sm" style="margin-bottom:0.5rem;">🎵 歌單管理</div>

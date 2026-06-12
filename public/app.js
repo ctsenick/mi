@@ -6,10 +6,16 @@ const state = {
   imposterCount: 1,
   imposterMode: 'song',
   totalRounds: 1,
+  category: 'random',
+  customSongIds: [],
   audioCtx: null,
   analyser: null,
   library: [],
 };
+
+const CAT_LABELS = { western: '西洋', japanese: '日文', korean: '韓文', chinese: '中文', uncategorized: '？' };
+
+function catLabel(cat) { return CAT_LABELS[cat] ?? '？'; }
 
 function showScreen(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
@@ -48,7 +54,7 @@ function initSocket() {
     overlay.classList.add('active');
     num.textContent = count;
     num.style.animation = 'none';
-    num.offsetHeight; // reflow to restart animation
+    num.offsetHeight;
     num.style.animation = '';
   });
 
@@ -64,7 +70,7 @@ function initSocket() {
     startVoteTimer(60);
   });
 
-  // vote_update intentionally not handled — vote counts are hidden during voting
+  // vote_update intentionally not handled — vote counts hidden during voting
 
   state.socket.on('reveal_result', (result) => showResult(result));
 
@@ -167,33 +173,33 @@ document.getElementById('btn-start-game').addEventListener('click', () => {
   });
 });
 
+// Imposter count
 document.getElementById('btn-imposter-minus').addEventListener('click', () => {
   state.imposterCount = Math.max(1, state.imposterCount - 1);
   document.getElementById('imposter-count-display').textContent = state.imposterCount;
   state.socket.emit('update_settings', { code: state.roomCode, settings: { imposterCount: state.imposterCount } });
 });
-
 document.getElementById('btn-imposter-plus').addEventListener('click', () => {
   state.imposterCount += 1;
   document.getElementById('imposter-count-display').textContent = state.imposterCount;
   state.socket.emit('update_settings', { code: state.roomCode, settings: { imposterCount: state.imposterCount } });
 });
 
+// Rounds
 document.getElementById('btn-rounds-minus').addEventListener('click', () => {
   state.totalRounds = Math.max(1, state.totalRounds - 1);
   document.getElementById('rounds-display').textContent = state.totalRounds;
   state.socket.emit('update_settings', { code: state.roomCode, settings: { totalRounds: state.totalRounds } });
 });
-
 document.getElementById('btn-rounds-plus').addEventListener('click', () => {
   state.totalRounds += 1;
   document.getElementById('rounds-display').textContent = state.totalRounds;
   state.socket.emit('update_settings', { code: state.roomCode, settings: { totalRounds: state.totalRounds } });
 });
 
+// Imposter mode
 document.getElementById('mode-song').addEventListener('click', () => setMode('song'));
 document.getElementById('mode-silent').addEventListener('click', () => setMode('silent'));
-
 function setMode(mode) {
   state.imposterMode = mode;
   document.getElementById('mode-song').classList.toggle('active', mode === 'song');
@@ -201,21 +207,87 @@ function setMode(mode) {
   state.socket.emit('update_settings', { code: state.roomCode, settings: { imposterMode: mode } });
 }
 
+// Category mode
+document.getElementById('category-grid').addEventListener('click', (e) => {
+  const btn = e.target.closest('.cat-mode-btn');
+  if (!btn) return;
+  setCategory(btn.dataset.cat);
+});
+
+function setCategory(cat) {
+  state.category = cat;
+  document.querySelectorAll('.cat-mode-btn').forEach(b => b.classList.toggle('active', b.dataset.cat === cat));
+  const customPanel = document.getElementById('custom-songs-panel');
+  customPanel.style.display = cat === 'custom' ? 'block' : 'none';
+  if (cat === 'custom') renderCustomSongPicker();
+  state.socket.emit('update_settings', { code: state.roomCode, settings: { category: cat } });
+}
+
+function renderCustomSongPicker() {
+  const list = document.getElementById('custom-songs-list');
+  if (!state.library.length) {
+    list.innerHTML = '<div class="subtitle" style="font-size:0.8rem;padding:0.5rem;">歌庫是空的，請先新增歌曲</div>';
+    return;
+  }
+  list.innerHTML = state.library.map(s => `
+    <label class="custom-song-item">
+      <input type="checkbox" value="${s.id}" ${state.customSongIds.includes(s.id) ? 'checked' : ''} />
+      <span class="custom-song-title">${s.title} — ${s.artist}</span>
+      <span class="cat-badge cat-${s.category}">${catLabel(s.category)}</span>
+    </label>
+  `).join('');
+
+  list.querySelectorAll('input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const id = parseInt(cb.value);
+      if (cb.checked) {
+        if (!state.customSongIds.includes(id)) state.customSongIds.push(id);
+      } else {
+        state.customSongIds = state.customSongIds.filter(x => x !== id);
+      }
+      state.socket.emit('update_settings', { code: state.roomCode, settings: { customSongIds: state.customSongIds } });
+    });
+  });
+}
+
 // ── Song Library ──────────────────────────────────────────────────────────
 async function loadLibrary() {
   const res = await fetch('/api/songs');
   state.library = await res.json();
   renderLibrary();
+  if (state.category === 'custom') renderCustomSongPicker();
 }
 
 function renderLibrary() {
   document.getElementById('library-count').textContent = state.library.length;
   document.getElementById('library-list').innerHTML = state.library.map(s => `
     <div class="library-item">
-      <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${s.title} — ${s.artist}</span>
+      <span class="library-title">${s.title} — ${s.artist}</span>
+      <select class="cat-select" data-id="${s.id}">
+        <option value="uncategorized" ${s.category === 'uncategorized' ? 'selected' : ''}>？</option>
+        <option value="western" ${s.category === 'western' ? 'selected' : ''}>西洋</option>
+        <option value="japanese" ${s.category === 'japanese' ? 'selected' : ''}>日文</option>
+        <option value="korean" ${s.category === 'korean' ? 'selected' : ''}>韓文</option>
+        <option value="chinese" ${s.category === 'chinese' ? 'selected' : ''}>中文</option>
+      </select>
       <button class="btn-remove" data-id="${s.id}">✕</button>
     </div>
   `).join('');
+
+  document.querySelectorAll('.cat-select').forEach(sel => {
+    sel.addEventListener('change', async () => {
+      await fetch(`/api/songs/${sel.dataset.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category: sel.value }),
+      });
+      // Update local state without full reload
+      const song = state.library.find(s => s.id === parseInt(sel.dataset.id));
+      if (song) song.category = sel.value;
+      if (state.category === 'custom') renderCustomSongPicker();
+    });
+  });
+
   document.querySelectorAll('.btn-remove').forEach(btn => {
     btn.addEventListener('click', async () => {
       await fetch(`/api/songs/${btn.dataset.id}`, { method: 'DELETE' });
@@ -243,12 +315,21 @@ async function searchSongs() {
           <div class="search-item-title">${t.title}</div>
           <div class="search-item-artist">${t.artist}</div>
         </div>
+        <select class="cat-select-mini" data-id="${t.spotify_id}">
+          <option value="uncategorized">？</option>
+          <option value="western">西洋</option>
+          <option value="japanese">日文</option>
+          <option value="korean">韓文</option>
+          <option value="chinese">中文</option>
+        </select>
         <button class="btn-add" data-track='${JSON.stringify(t).replace(/'/g, "&#39;")}'>加入</button>
       </div>
     `).join('');
     document.querySelectorAll('.btn-add').forEach(btn => {
       btn.addEventListener('click', async () => {
         const track = JSON.parse(btn.dataset.track);
+        const catSel = btn.closest('.search-item').querySelector('.cat-select-mini');
+        track.category = catSel ? catSel.value : 'uncategorized';
         btn.disabled = true;
         btn.textContent = '…';
         const r = await fetch('/api/songs', {
@@ -267,7 +348,6 @@ async function searchSongs() {
 
 // ── Audio & Visualizer ────────────────────────────────────────────────────
 async function startAudio(previewUrl, startAt, duration) {
-  // Clean up previous round's audio context
   if (state.audioCtx) {
     state.audioCtx.close().catch(() => {});
     state.audioCtx = null;
@@ -294,7 +374,6 @@ async function startAudio(previewUrl, startAt, duration) {
       startVisualizer(false);
     }, delay);
   } else {
-    // Silent imposter: fake visualizer so it's not obvious
     setTimeout(() => startVisualizer(true), delay);
   }
 
@@ -330,13 +409,11 @@ function startVisualizer(silent) {
   function draw() {
     requestAnimationFrame(draw);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-
     if (state.analyser && !silent) {
       state.analyser.getByteFrequencyData(dataArray);
     } else {
       for (let i = 0; i < bufferLength; i++) dataArray[i] = Math.random() * 30 + 10;
     }
-
     const barW = (canvas.width / bufferLength) * 1.5;
     let x = 0;
     for (let i = 0; i < bufferLength; i++) {
@@ -394,7 +471,6 @@ function showResult({ eliminated, players, civilianWin, currentRound, totalRound
   const overlay = document.getElementById('result-overlay');
   overlay.classList.add('active');
 
-  // Round indicator
   document.getElementById('result-round').textContent =
     totalRounds > 1 ? `第 ${currentRound} / ${totalRounds} 局` : '';
 
@@ -405,7 +481,6 @@ function showResult({ eliminated, players, civilianWin, currentRound, totalRound
   document.getElementById('result-eliminated').textContent =
     `被淘汰：${eliminated.name}（${eliminated.role === 'imposter' ? '果然是臥底！' : '是平民...'}）`;
 
-  // Song reveal
   if (songs) {
     document.getElementById('result-songs').innerHTML = `
       <div class="songs-reveal">
@@ -421,7 +496,6 @@ function showResult({ eliminated, players, civilianWin, currentRound, totalRound
     `;
   }
 
-  // Players with roles + vote counts
   document.getElementById('result-players').innerHTML = players.map(p => `
     <div class="result-player-row">
       <span>${p.name}</span>
@@ -430,10 +504,8 @@ function showResult({ eliminated, players, civilianWin, currentRound, totalRound
     </div>
   `).join('');
 
-  // Buttons — only host controls flow
   const nextRoundBtn = document.getElementById('btn-result-next-round');
   const restartBtn = document.getElementById('btn-result-restart');
-
   nextRoundBtn.style.display = 'none';
   restartBtn.style.display = 'none';
 

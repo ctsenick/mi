@@ -8,19 +8,38 @@ function generateRoomCode() {
   return crypto.randomBytes(3).toString('hex').toUpperCase();
 }
 
-async function pickSongs() {
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  const res = await pool.query(
-    `SELECT * FROM songs WHERE last_played IS NULL OR last_played < $1 ORDER BY RANDOM() LIMIT 20`,
-    [thirtyDaysAgo]
-  );
-  let songs = res.rows;
+const CAT_LABELS = { western: '西洋', japanese: '日文', korean: '韓文', chinese: '中文', uncategorized: '未分類' };
 
-  if (songs.length < 2) {
-    const fallback = await pool.query(`SELECT * FROM songs ORDER BY last_played NULLS FIRST LIMIT 20`);
-    songs = fallback.rows;
+async function pickSongs({ category, customSongIds }) {
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  let songs;
+
+  if (category === 'custom') {
+    if (!customSongIds || customSongIds.length < 2)
+      throw new Error('自訂模式至少需要選擇 2 首歌曲');
+    const res = await pool.query(`SELECT * FROM songs WHERE id = ANY($1::int[]) ORDER BY RANDOM()`, [customSongIds]);
+    songs = res.rows;
+    if (songs.length < 2) throw new Error('自訂歌曲不足 2 首');
+  } else {
+    const specific = category && category !== 'random';
+    const recentQ = specific
+      ? `SELECT * FROM songs WHERE (last_played IS NULL OR last_played < $1) AND category=$2 ORDER BY RANDOM() LIMIT 20`
+      : `SELECT * FROM songs WHERE last_played IS NULL OR last_played < $1 ORDER BY RANDOM() LIMIT 20`;
+    const res = await pool.query(recentQ, specific ? [thirtyDaysAgo, category] : [thirtyDaysAgo]);
+    songs = res.rows;
+
+    if (songs.length < 2) {
+      const fallQ = specific
+        ? `SELECT * FROM songs WHERE category=$1 ORDER BY last_played NULLS FIRST LIMIT 20`
+        : `SELECT * FROM songs ORDER BY last_played NULLS FIRST LIMIT 20`;
+      const fallback = await pool.query(fallQ, specific ? [category] : []);
+      songs = fallback.rows;
+    }
+    if (songs.length < 2) {
+      const label = specific ? `「${CAT_LABELS[category] ?? category}」分類` : '歌庫';
+      throw new Error(`${label}歌曲不足 2 首，請先新增歌曲`);
+    }
   }
-  if (songs.length < 2) throw new Error('歌庫至少需要 2 首歌才能開始遊戲');
 
   const civilian = songs[Math.floor(Math.random() * songs.length)];
   const contrasts = songs.filter(
@@ -33,7 +52,7 @@ async function pickSongs() {
 }
 
 async function prepareRound(room, code) {
-  const { civilian, imposter } = await pickSongs();
+  const { civilian, imposter } = await pickSongs(room.settings);
   const playerList = [...room.players.values()];
   const shuffled = [...playerList].sort(() => Math.random() - 0.5);
   const imposterCount = Math.min(room.settings.imposterCount, playerList.length - 1);
@@ -99,7 +118,7 @@ export async function createRoom(hostSocketId, hostName) {
     currentRound: 0,
     civilianSong: null,
     imposterSong: null,
-    settings: { imposterCount: 1, imposterMode: 'song', totalRounds: 1 },
+    settings: { imposterCount: 1, imposterMode: 'song', totalRounds: 1, category: 'random', customSongIds: [] },
   });
 
   return { code, sessionId, player: host };
@@ -137,6 +156,8 @@ export function updateSettings(code, socketId, settings) {
   if (settings.imposterCount !== undefined) room.settings.imposterCount = Math.max(1, settings.imposterCount);
   if (settings.imposterMode !== undefined) room.settings.imposterMode = settings.imposterMode;
   if (settings.totalRounds !== undefined) room.settings.totalRounds = Math.max(1, settings.totalRounds);
+  if (settings.category !== undefined) room.settings.category = settings.category;
+  if (settings.customSongIds !== undefined) room.settings.customSongIds = settings.customSongIds;
   return room;
 }
 

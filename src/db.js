@@ -49,6 +49,7 @@ export async function initDb() {
   await pool.query(`
     ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS total_rounds INT DEFAULT 1;
     ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS current_round INT DEFAULT 1;
+    ALTER TABLE songs ADD COLUMN IF NOT EXISTS category VARCHAR(20) DEFAULT 'uncategorized';
   `);
   console.log('Database initialized');
 }

@@ -60,7 +60,6 @@ h3 { font-size: 1.1rem; font-weight: 600; }
 .btn-add { background: var(--accent); color: #000; border: none; border-radius: 8px; padding: 0.4rem 0.8rem; font-weight: 700; cursor: pointer; flex-shrink: 0; }
 
 .library-list { display: flex; flex-direction: column; gap: 0.4rem; max-height: 150px; overflow-y: auto; }
-.library-item { display: flex; align-items: center; justify-content: space-between; padding: 0.5rem 0.8rem; background: var(--surface); border-radius: 8px; font-size: 0.85rem; }
 .btn-remove { background: none; border: none; color: #ef4444; cursor: pointer; font-size: 1rem; padding: 0.2rem; }
 
 #screen-dance { align-items: center; justify-content: center; background: var(--bg); text-align: center; }
@@ -103,3 +102,26 @@ h3 { font-size: 1.1rem; font-weight: 600; }
 .song-row { display: flex; flex-direction: column; gap: 0.15rem; }
 .song-label { font-size: 0.78rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
 .song-info { font-size: 0.9rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── Categories ─────────────────────────────────────────────────────────── */
+.category-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.4rem; }
+.cat-mode-btn { border: 1px solid #444; background: var(--surface); color: var(--text-dim); border-radius: 10px; padding: 0.5rem 0.2rem; font-size: 0.8rem; font-weight: 600; cursor: pointer; min-height: 40px; }
+.cat-mode-btn.active { background: var(--accent2); color: #000; border-color: var(--accent2); }
+
+.cat-badge { padding: 0.15rem 0.5rem; border-radius: 6px; font-size: 0.7rem; font-weight: 700; flex-shrink: 0; }
+.cat-western { background: #3b82f6; color: #fff; }
+.cat-japanese { background: #ef4444; color: #fff; }
+.cat-korean { background: #f97316; color: #fff; }
+.cat-chinese { background: #eab308; color: #000; }
+.cat-uncategorized { background: #444; color: #aaa; }
+
+.cat-select { background: #333; border: 1px solid #555; color: var(--text); border-radius: 6px; padding: 0.2rem 0.3rem; font-size: 0.75rem; cursor: pointer; flex-shrink: 0; }
+.cat-select-mini { background: #333; border: 1px solid #555; color: var(--text); border-radius: 6px; padding: 0.2rem 0.3rem; font-size: 0.75rem; flex-shrink: 0; }
+
+.library-item { display: flex; align-items: center; gap: 0.4rem; padding: 0.5rem 0.8rem; background: var(--surface); border-radius: 8px; }
+.library-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.85rem; }
+
+.custom-songs-list { display: flex; flex-direction: column; gap: 0.4rem; max-height: 200px; overflow-y: auto; }
+.custom-song-item { display: flex; align-items: center; gap: 0.6rem; background: var(--surface); border-radius: 8px; padding: 0.6rem 0.8rem; cursor: pointer; }
+.custom-song-item input[type=checkbox] { flex-shrink: 0; width: 18px; height: 18px; accent-color: var(--accent2); }
+.custom-song-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.85rem; }
