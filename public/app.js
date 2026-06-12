@@ -12,6 +12,7 @@ const state = {
   audioCtx: null,
   analyser: null,
   currentSource: null,
+  preparePromise: null, // resolves to AudioBuffer fetched during countdown
   library: [],
 };
 
@@ -72,6 +73,20 @@ function initSocket() {
       (state.isHost && allReady) ? 'flex' : 'none';
   });
 
+  // Sent at countdown start — client fetches + decodes audio in the background
+  // so it's ready the moment game_start arrives.
+  state.socket.on('game_prepare', ({ previewUrl }) => {
+    const ctx = state.audioCtx;
+    if (!previewUrl || !ctx) {
+      state.preparePromise = Promise.resolve(null);
+      return;
+    }
+    state.preparePromise = fetch(previewUrl)
+      .then(r => r.arrayBuffer())
+      .then(buf => ctx.decodeAudioData(buf))
+      .catch(err => { console.error('Audio pre-fetch failed:', err); return null; });
+  });
+
   state.socket.on('countdown', ({ count }) => {
     const overlay = document.getElementById('countdown-overlay');
     const num = document.getElementById('countdown-number');
@@ -82,10 +97,10 @@ function initSocket() {
     num.style.animation = '';
   });
 
-  state.socket.on('game_start', async ({ previewUrl, startAt, duration }) => {
+  state.socket.on('game_start', async ({ startAt, duration }) => {
     document.getElementById('countdown-overlay').classList.remove('active');
     showScreen('dance');
-    await startAudio(previewUrl, startAt, duration);
+    await startAudio(startAt, duration);
   });
 
   state.socket.on('start_voting', ({ players }) => {
@@ -341,63 +356,42 @@ async function searchSongs() {
 }
 
 // ── Audio & Visualizer ────────────────────────────────────────────────────
-async function startAudio(previewUrl, startAt, duration) {
-  // Stop previous source but KEEP the AudioContext alive across rounds.
-  // On iOS, creating a new AudioContext requires another user gesture.
+async function startAudio(startAt, duration) {
+  // Stop previous source but KEEP the AudioContext alive (iOS: new context = new gesture needed)
   if (state.currentSource) {
     try { state.currentSource.stop(); } catch (_) {}
     state.currentSource = null;
   }
   state.analyser = null;
 
-  // Schedule the dance timer based on the original startAt so it's in sync
-  // even if audio fetch takes a few hundred ms.
-  const initialDelayMs = Math.max(0, startAt - Date.now());
-  setTimeout(() => startDanceTimer(duration / 1000), initialDelayMs);
+  const delayMs = Math.max(0, startAt - Date.now());
+  setTimeout(() => startDanceTimer(duration / 1000), delayMs);
 
   const ctx = state.audioCtx;
-  if (!ctx) {
-    // AudioContext wasn't unlocked — silent fallback
-    setTimeout(() => startVisualizer(true), initialDelayMs);
+  if (!ctx) { setTimeout(() => startVisualizer(true), delayMs); return; }
+  if (ctx.state === 'suspended') { try { await ctx.resume(); } catch (_) {} }
+
+  // Audio was pre-fetched during the countdown; await should return instantly.
+  const audioBuf = state.preparePromise ? await state.preparePromise : null;
+
+  if (!audioBuf) {
+    setTimeout(() => startVisualizer(true), delayMs);
     return;
   }
 
-  if (ctx.state === 'suspended') {
-    try { await ctx.resume(); } catch (_) {}
-  }
+  state.analyser = ctx.createAnalyser();
+  state.analyser.fftSize = 128;
 
-  if (!previewUrl) {
-    setTimeout(() => startVisualizer(true), initialDelayMs);
-    return;
-  }
+  const source = ctx.createBufferSource();
+  source.buffer = audioBuf;
+  source.connect(state.analyser);
+  state.analyser.connect(ctx.destination);
 
-  try {
-    // Fetch and decode audio as ArrayBuffer — this is the iOS-compatible path.
-    // HTMLAudioElement.play() requires a user gesture in a setTimeout on iOS;
-    // AudioBufferSourceNode.start() does not, as long as the AudioContext was
-    // already unlocked by a prior user gesture (done in join/ready handlers).
-    const resp = await fetch(previewUrl);
-    const arrayBuf = await resp.arrayBuffer();
-    const audioBuf = await ctx.decodeAudioData(arrayBuf);
+  const remainingS = Math.max(0, (startAt - Date.now()) / 1000);
+  source.start(ctx.currentTime + remainingS);
+  state.currentSource = source;
 
-    state.analyser = ctx.createAnalyser();
-    state.analyser.fftSize = 128;
-
-    const source = ctx.createBufferSource();
-    source.buffer = audioBuf;
-    source.connect(state.analyser);
-    state.analyser.connect(ctx.destination);
-
-    // Recalculate remaining delay after fetch + decode time
-    const remainingS = Math.max(0, (startAt - Date.now()) / 1000);
-    source.start(ctx.currentTime + remainingS);
-    state.currentSource = source;
-
-    setTimeout(() => startVisualizer(false), remainingS * 1000);
-  } catch (err) {
-    console.error('Audio error:', err);
-    setTimeout(() => startVisualizer(true), Math.max(0, startAt - Date.now()));
-  }
+  setTimeout(() => startVisualizer(false), remainingS * 1000);
 }
 
 let danceTimerInterval = null;

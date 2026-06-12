@@ -29,18 +29,21 @@ app.get('*', (req, res) => res.sendFile(join(__dirname, '..', 'public', 'index.h
 const voteTimers = new Map();
 
 async function runRound(code, playerPayloads) {
+  // 1. Pre-fetch signal: each client starts fetching their audio NOW,
+  //    during the countdown, so decode is done by the time "1" finishes.
+  playerPayloads.forEach(({ socketId, previewUrl }) => {
+    io.to(socketId).emit('game_prepare', { previewUrl });
+  });
+
+  // 2. Countdown (3 seconds total — clients fetch audio in the background)
   for (let i = 3; i >= 1; i--) {
     io.to(code).emit('countdown', { count: i });
     await new Promise(r => setTimeout(r, 1000));
   }
 
-  // Set startAt AFTER the countdown so clients have ~3s to fetch + decode
-  // audio before playback begins (required for iOS Web Audio API flow).
-  const startAt = Date.now() + 3000;
-
-  playerPayloads.forEach(({ socketId, previewUrl }) => {
-    io.to(socketId).emit('game_start', { previewUrl, startAt, duration: 30000 });
-  });
+  // 3. Audio should be decoded by now; give 500 ms buffer for network jitter.
+  const startAt = Date.now() + 500;
+  io.to(code).emit('game_start', { startAt, duration: 30000 });
 
   // After 30s music + 2s buffer → open voting
   setTimeout(() => {
