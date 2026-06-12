@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { searchTracks, getAudioFeatures } from '../spotify.js';
+import { searchTracks, getAudioFeatures } from '../music.js';
 import { pool } from '../db.js';
 import QRCode from 'qrcode';
 
