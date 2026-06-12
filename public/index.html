@@ -103,24 +103,23 @@
         </div>
       </div>
       <div id="custom-songs-panel" style="display:none;margin-bottom:1rem;">
-        <div class="label-sm" style="margin-bottom:0.4rem;">自訂歌曲（至少選 2 首）</div>
+        <div class="label-sm" style="margin-bottom:0.4rem;">
+          自訂歌曲 — <span id="custom-selected-count" style="color:var(--accent);">已選 0 首</span>
+        </div>
+        <div style="display:flex;gap:0.5rem;margin-bottom:0.5rem;">
+          <input class="input" id="custom-search-input" placeholder="搜尋歌名或歌手…" style="flex:1;" />
+        </div>
         <div id="custom-songs-list" class="custom-songs-list"></div>
       </div>
       <hr class="divider" />
       <div>
-        <div class="label-sm" style="margin-bottom:0.5rem;">🎵 歌單管理</div>
+        <div class="label-sm" style="margin-bottom:0.5rem;">🎵 新增歌曲到歌庫（<span id="library-count">0</span> 首）</div>
         <div style="display:flex;gap:0.5rem;margin-bottom:0.5rem;">
           <input class="input" id="song-search-input" placeholder="搜尋歌曲…" style="flex:1;" />
           <button class="btn btn-primary" id="btn-song-search" style="width:auto;padding:0 1rem;">搜尋</button>
         </div>
         <div class="search-results" id="search-results"></div>
         <div id="search-msg" class="subtitle" style="font-size:0.8rem;margin-top:0.3rem;"></div>
-      </div>
-      <hr class="divider" />
-      <div>
-        <div class="label-sm" style="margin-bottom:0.5rem;">歌庫（<span id="library-count">0</span> 首）</div>
-        <div class="library-list" id="library-list"></div>
-        <div id="library-msg" class="error-msg" style="margin-top:0.3rem;font-size:0.8rem;"></div>
       </div>
     </div>
     <button class="btn btn-primary" id="btn-ready">✅ 準備</button>

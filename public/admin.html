@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>音樂臥底 — 管理後台</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #111; --surface: #1e1e1e; --border: #333;
+      --accent: #F5FF50; --accent2: #C084FC;
+      --text: #eee; --dim: #888;
+      --red: #ef4444; --green: #22c55e; --blue: #3b82f6; --orange: #f97316; --yellow: #eab308;
+    }
+    body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; }
+    a { color: var(--accent); text-decoration: none; }
+
+    /* Login */
+    #login-panel { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; gap: 1rem; }
+    #login-panel h1 { font-size: 1.6rem; }
+    #login-panel input { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 0.6rem 1rem; border-radius: 8px; font-size: 1rem; width: 260px; outline: none; }
+    #login-panel input:focus { border-color: var(--accent); }
+    #login-panel button { background: var(--accent); color: #000; border: none; padding: 0.6rem 2rem; border-radius: 8px; font-weight: 700; cursor: pointer; font-size: 1rem; }
+    #login-error { color: var(--red); font-size: 0.85rem; }
+
+    /* Main layout */
+    #main-panel { display: none; padding: 1.5rem; max-width: 1100px; margin: 0 auto; }
+    header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 0.8rem; }
+    header h1 { font-size: 1.3rem; }
+    .header-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+
+    /* Buttons */
+    .btn { border: none; padding: 0.45rem 1rem; border-radius: 7px; font-size: 0.85rem; font-weight: 600; cursor: pointer; }
+    .btn-primary { background: var(--accent); color: #000; }
+    .btn-danger { background: var(--red); color: #fff; }
+    .btn-secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* Filter tabs */
+    .filter-bar { display: flex; gap: 0.4rem; margin-bottom: 1rem; flex-wrap: wrap; align-items: center; }
+    .filter-btn { border: 1px solid var(--border); background: var(--surface); color: var(--dim); border-radius: 99px; padding: 0.3rem 0.9rem; font-size: 0.8rem; font-weight: 600; cursor: pointer; }
+    .filter-btn.active { background: var(--accent2); color: #000; border-color: var(--accent2); }
+    #song-count-label { color: var(--dim); font-size: 0.85rem; margin-left: auto; }
+
+    /* Search */
+    .search-bar { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+    .search-bar input { flex: 1; background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 0.5rem 0.8rem; border-radius: 7px; font-size: 0.9rem; outline: none; }
+    .search-bar input:focus { border-color: var(--accent); }
+
+    /* Table */
+    .table-wrap { overflow-x: auto; border-radius: 10px; border: 1px solid var(--border); }
+    table { width: 100%; border-collapse: collapse; }
+    thead th { background: var(--surface); color: var(--dim); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 0.7rem 0.8rem; text-align: left; border-bottom: 1px solid var(--border); }
+    tbody tr { border-bottom: 1px solid var(--border); }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: #1a1a1a; }
+    td { padding: 0.6rem 0.8rem; }
+    .td-title { max-width: 260px; }
+    .td-title .song-title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .td-title .song-artist { color: var(--dim); font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .td-genre { color: var(--dim); font-size: 0.8rem; max-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* Category select in table */
+    .cat-select { background: #2a2a2a; border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 0.25rem 0.4rem; font-size: 0.8rem; cursor: pointer; }
+    .cat-badge { display: inline-block; padding: 0.2rem 0.6rem; border-radius: 99px; font-size: 0.75rem; font-weight: 700; }
+    .cat-western { background: var(--blue); color: #fff; }
+    .cat-japanese { background: var(--red); color: #fff; }
+    .cat-korean { background: var(--orange); color: #fff; }
+    .cat-chinese { background: var(--yellow); color: #000; }
+    .cat-uncategorized { background: #333; color: var(--dim); }
+
+    /* Toast */
+    #toast { position: fixed; bottom: 1.5rem; right: 1.5rem; background: #222; color: var(--text); border: 1px solid var(--border); padding: 0.7rem 1.2rem; border-radius: 8px; font-size: 0.9rem; display: none; z-index: 999; }
+    #toast.show { display: block; }
+
+    /* Empty state */
+    .empty { text-align: center; padding: 3rem; color: var(--dim); }
+  </style>
+</head>
+<body>
+
+<!-- Login -->
+<div id="login-panel">
+  <h1>🕺 管理後台</h1>
+  <input type="password" id="pw-input" placeholder="管理密碼" autocomplete="current-password" />
+  <button id="btn-login">登入</button>
+  <div id="login-error"></div>
+</div>
+
+<!-- Main -->
+<div id="main-panel">
+  <header>
+    <h1>🎵 歌曲管理</h1>
+    <div class="header-actions">
+      <button class="btn btn-secondary" id="btn-auto-detect">🔍 自動偵測所有分類</button>
+      <a href="/" class="btn btn-secondary">← 回遊戲</a>
+    </div>
+  </header>
+
+  <div class="filter-bar" id="filter-bar">
+    <button class="filter-btn active" data-cat="all">全部</button>
+    <button class="filter-btn" data-cat="western">🌍 西洋</button>
+    <button class="filter-btn" data-cat="japanese">🇯🇵 日文</button>
+    <button class="filter-btn" data-cat="korean">🇰🇷 韓文</button>
+    <button class="filter-btn" data-cat="chinese">🇨🇳 中文</button>
+    <button class="filter-btn" data-cat="uncategorized">？ 未分類</button>
+    <span id="song-count-label">0 首</span>
+  </div>
+
+  <div class="search-bar">
+    <input type="search" id="search-input" placeholder="搜尋歌名、歌手…" />
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>歌曲</th>
+          <th>曲風（iTunes）</th>
+          <th>分類</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="song-table-body"></tbody>
+    </table>
+    <div class="empty" id="empty-msg" style="display:none;">沒有符合的歌曲</div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="/admin.js"></script>
+</body>
+</html>

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { initDb } from './db.js';
 import apiRouter from './routes/api.js';
+import adminRouter from './routes/admin.js';
 import {
   createRoom, joinRoom, setReady, updateSettings,
   startGame, nextRound, submitVote, resolveResult, restartGame,
@@ -19,6 +20,8 @@ const io = new Server(httpServer);
 
 app.use(express.json());
 app.use('/api', apiRouter);
+app.use('/admin/api', adminRouter);
+app.get('/admin', (req, res) => res.sendFile(join(__dirname, '..', 'public', 'admin.html')));
 app.use(express.static(join(__dirname, '..', 'public')));
 app.get('*', (req, res) => res.sendFile(join(__dirname, '..', 'public', 'index.html')));
 

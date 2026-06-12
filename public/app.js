@@ -219,17 +219,26 @@ function setCategory(cat) {
   document.querySelectorAll('.cat-mode-btn').forEach(b => b.classList.toggle('active', b.dataset.cat === cat));
   const customPanel = document.getElementById('custom-songs-panel');
   customPanel.style.display = cat === 'custom' ? 'block' : 'none';
-  if (cat === 'custom') renderCustomSongPicker();
+  if (cat === 'custom') filterCustomSongs();
   state.socket.emit('update_settings', { code: state.roomCode, settings: { category: cat } });
 }
 
-function renderCustomSongPicker() {
+// Custom picker: filter library by search term, show as checkboxes
+document.getElementById('custom-search-input').addEventListener('input', filterCustomSongs);
+
+function filterCustomSongs() {
+  const q = document.getElementById('custom-search-input').value.toLowerCase().trim();
+  const results = q
+    ? state.library.filter(s => s.title.toLowerCase().includes(q) || s.artist.toLowerCase().includes(q))
+    : state.library.slice(0, 40);
+
   const list = document.getElementById('custom-songs-list');
   if (!state.library.length) {
     list.innerHTML = '<div class="subtitle" style="font-size:0.8rem;padding:0.5rem;">歌庫是空的，請先新增歌曲</div>';
     return;
   }
-  list.innerHTML = state.library.map(s => `
+
+  list.innerHTML = results.map(s => `
     <label class="custom-song-item">
       <input type="checkbox" value="${s.id}" ${state.customSongIds.includes(s.id) ? 'checked' : ''} />
       <span class="custom-song-title">${s.title} — ${s.artist}</span>
@@ -245,6 +254,7 @@ function renderCustomSongPicker() {
       } else {
         state.customSongIds = state.customSongIds.filter(x => x !== id);
       }
+      document.getElementById('custom-selected-count').textContent = `已選 ${state.customSongIds.length} 首`;
       state.socket.emit('update_settings', { code: state.roomCode, settings: { customSongIds: state.customSongIds } });
     });
   });
@@ -254,46 +264,8 @@ function renderCustomSongPicker() {
 async function loadLibrary() {
   const res = await fetch('/api/songs');
   state.library = await res.json();
-  renderLibrary();
-  if (state.category === 'custom') renderCustomSongPicker();
-}
-
-function renderLibrary() {
   document.getElementById('library-count').textContent = state.library.length;
-  document.getElementById('library-list').innerHTML = state.library.map(s => `
-    <div class="library-item">
-      <span class="library-title">${s.title} — ${s.artist}</span>
-      <select class="cat-select" data-id="${s.id}">
-        <option value="uncategorized" ${s.category === 'uncategorized' ? 'selected' : ''}>？</option>
-        <option value="western" ${s.category === 'western' ? 'selected' : ''}>西洋</option>
-        <option value="japanese" ${s.category === 'japanese' ? 'selected' : ''}>日文</option>
-        <option value="korean" ${s.category === 'korean' ? 'selected' : ''}>韓文</option>
-        <option value="chinese" ${s.category === 'chinese' ? 'selected' : ''}>中文</option>
-      </select>
-      <button class="btn-remove" data-id="${s.id}">✕</button>
-    </div>
-  `).join('');
-
-  document.querySelectorAll('.cat-select').forEach(sel => {
-    sel.addEventListener('change', async () => {
-      await fetch(`/api/songs/${sel.dataset.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ category: sel.value }),
-      });
-      // Update local state without full reload
-      const song = state.library.find(s => s.id === parseInt(sel.dataset.id));
-      if (song) song.category = sel.value;
-      if (state.category === 'custom') renderCustomSongPicker();
-    });
-  });
-
-  document.querySelectorAll('.btn-remove').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      await fetch(`/api/songs/${btn.dataset.id}`, { method: 'DELETE' });
-      loadLibrary();
-    });
-  });
+  if (state.category === 'custom') filterCustomSongs();
 }
 
 document.getElementById('btn-song-search').addEventListener('click', searchSongs);
@@ -315,21 +287,12 @@ async function searchSongs() {
           <div class="search-item-title">${t.title}</div>
           <div class="search-item-artist">${t.artist}</div>
         </div>
-        <select class="cat-select-mini" data-id="${t.spotify_id}">
-          <option value="uncategorized">？</option>
-          <option value="western">西洋</option>
-          <option value="japanese">日文</option>
-          <option value="korean">韓文</option>
-          <option value="chinese">中文</option>
-        </select>
         <button class="btn-add" data-track='${JSON.stringify(t).replace(/'/g, "&#39;")}'>加入</button>
       </div>
     `).join('');
     document.querySelectorAll('.btn-add').forEach(btn => {
       btn.addEventListener('click', async () => {
         const track = JSON.parse(btn.dataset.track);
-        const catSel = btn.closest('.search-item').querySelector('.cat-select-mini');
-        track.category = catSel ? catSel.value : 'uncategorized';
         btn.disabled = true;
         btn.textContent = '…';
         const r = await fetch('/api/songs', {
