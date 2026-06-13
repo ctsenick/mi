@@ -20,7 +20,7 @@ html, body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-size: 16px;
   -webkit-tap-highlight-color: transparent;
-  overscroll-behavior: none; /* disable iOS rubber-band scroll */
+  overscroll-behavior-x: none; /* prevent horizontal rubber-band only; vertical scroll stays natural */
 }
 
 #app { max-width: 480px; min-height: 100svh; margin: 0 auto; display: flex; flex-direction: column; padding: 1.5rem 1rem; }
