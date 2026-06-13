@@ -19,8 +19,9 @@ html, body {
   font-size: 16px;
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior-x: none;
-  /* Disables double-tap zoom while keeping scroll and single-tap */
-  touch-action: manipulation;
+  /* pan-y = only vertical scroll allowed; pinch-zoom blocked at browser level
+     before any JS event fires — more reliable than event.preventDefault() */
+  touch-action: pan-y;
 }
 
 #app { max-width: 480px; min-height: 100svh; margin: 0 auto; display: flex; flex-direction: column; padding: 1.5rem 1rem; }

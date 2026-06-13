@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#1A1A1A" />
   <title>音樂臥底舞王</title>
   <link rel="stylesheet" href="/style.css" />
@@ -156,25 +156,30 @@
 <script src="/socket.io/socket.io.js"></script>
 <script src="/app.js"></script>
 <script>
-  // iOS Safari ignores user-scalable=no since iOS 10.
-  // Must block at touchmove level — touchstart alone misses time-delayed fingers.
-  document.addEventListener('touchmove', function(e) {
-    if (e.touches.length > 1) e.preventDefault(); // pinch — even with staggered fingers
-  }, { passive: false });
+  // iOS 10+ ignores user-scalable=no. Three-layer defence:
+
+  // Layer 1: JS event interception (catches most cases)
   document.addEventListener('touchstart', function(e) {
     if (e.touches.length > 1) e.preventDefault();
   }, { passive: false });
-  // Prevent double-tap zoom
+  document.addEventListener('touchmove', function(e) {
+    if (e.touches.length > 1) e.preventDefault();
+  }, { passive: false });
   var lastTap = 0;
   document.addEventListener('touchend', function(e) {
     var now = Date.now();
     if (now - lastTap < 300) e.preventDefault();
     lastTap = now;
   }, { passive: false });
-  // Catch Safari's native gesture events
   document.addEventListener('gesturestart',  function(e) { e.preventDefault(); }, { passive: false });
   document.addEventListener('gesturechange', function(e) { e.preventDefault(); }, { passive: false });
   document.addEventListener('gestureend',    function(e) { e.preventDefault(); }, { passive: false });
+
+  // Layer 2: If any zoom slips through, force viewport back to scale=1 immediately.
+  var VP = 'width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover';
+  window.addEventListener('resize', function() {
+    document.querySelector('meta[name=viewport]').setAttribute('content', VP);
+  });
 </script>
 </body>
 </html>
