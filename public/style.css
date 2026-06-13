@@ -13,14 +13,14 @@
 
 html, body {
   height: 100%;
-  /* Lock the viewport to the smallest stable size (address bar visible).
-     Prevents layout jump when iOS Safari shows/hides the address bar. */
   min-height: 100svh;
   background: var(--bg); color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-size: 16px;
   -webkit-tap-highlight-color: transparent;
-  overscroll-behavior-x: none; /* prevent horizontal rubber-band only; vertical scroll stays natural */
+  overscroll-behavior-x: none;
+  /* Disables double-tap zoom while keeping scroll and single-tap */
+  touch-action: manipulation;
 }
 
 #app { max-width: 480px; min-height: 100svh; margin: 0 auto; display: flex; flex-direction: column; padding: 1.5rem 1rem; }
