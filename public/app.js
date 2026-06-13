@@ -415,7 +415,9 @@ function startVisualizer(silent) {
   const ctx = canvas.getContext('2d');
   function resize() { canvas.width = canvas.offsetWidth; canvas.height = canvas.offsetHeight; }
   resize();
-  window.addEventListener('resize', resize);
+  // ResizeObserver watches only the canvas element, not the whole window,
+  // so address-bar show/hide on iOS does NOT trigger a redraw.
+  new ResizeObserver(resize).observe(canvas);
 
   const bufferLength = state.analyser ? state.analyser.frequencyBinCount : 64;
   const dataArray = new Uint8Array(bufferLength);

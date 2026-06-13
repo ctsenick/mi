@@ -164,7 +164,7 @@ export function updateSettings(code, socketId, settings) {
 export async function startGame(code, socketId) {
   const room = rooms.get(code);
   if (!room || room.hostSocketId !== socketId) throw new Error('只有房主可以開始遊戲');
-  if (room.players.size < 2) throw new Error('至少需要 2 位玩家');
+  if (room.players.size < 3) throw new Error('至少需要 3 位玩家才能開始');
   room.currentRound = 1;
   return prepareRound(room, code);
 }
