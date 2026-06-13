@@ -10,7 +10,7 @@ import adminRouter from './routes/admin.js';
 import {
   createRoom, joinRoom, setReady, updateSettings,
   startGame, nextRound, submitVote, resolveResult, restartGame,
-  setVoting, removePlayer, getRoomPlayers, getVotingPlayers,
+  setVoting, removePlayer, getRoomPlayers, getVotingPlayers, checkAllVoted,
 } from './gameManager.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -139,7 +139,19 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     const result = removePlayer(socket.id);
-    if (result) io.to(result.code).emit('room_update', { players: getRoomPlayers(result.code) });
+    if (!result) return;
+    const { code, room } = result;
+    if (room.players.size > 0) {
+      io.to(code).emit('room_update', { players: getRoomPlayers(code) });
+    }
+    // If a player left during voting, check if all remaining players have now voted
+    if (room.status === 'voting' && checkAllVoted(code)) {
+      const timer = voteTimers.get(code);
+      if (timer) { clearTimeout(timer); voteTimers.delete(code); }
+      resolveResult(code).then(res => {
+        if (res) io.to(code).emit('reveal_result', res);
+      });
+    }
   });
 });
 

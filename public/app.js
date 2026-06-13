@@ -181,6 +181,30 @@ async function enterRoom(code) {
   } catch (_) {}
 }
 
+document.getElementById('btn-leave-room').addEventListener('click', () => {
+  if (!confirm('確定要離開房間嗎？')) return;
+  if (state.socket) {
+    state.socket.disconnect();
+    state.socket = null;
+  }
+  state.roomCode = null;
+  state.playerId = null;
+  state.isHost = false;
+  state.imposterCount = 1;
+  state.imposterMode = 'song';
+  state.totalRounds = 1;
+  state.category = 'random';
+  state.customSongIds = [];
+  state.library = [];
+  document.getElementById('host-settings').style.display = 'none';
+  document.getElementById('player-list').innerHTML = '';
+  document.getElementById('room-msg').textContent = '';
+  document.getElementById('btn-start-game').style.display = 'none';
+  document.getElementById('btn-ready').disabled = false;
+  document.getElementById('btn-ready').textContent = '✅ 準備';
+  showScreen('lobby');
+});
+
 // ── Room ──────────────────────────────────────────────────────────────────
 function renderPlayerList(players) {
   document.getElementById('player-count').textContent = `${players.length} 人`;

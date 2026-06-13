@@ -266,9 +266,24 @@ export function removePlayer(socketId) {
   const result = getRoomBySocket(socketId);
   if (!result) return null;
   const { code, room } = result;
+  const player = room.players.get(socketId);
+
+  // If this player had voted, remove their vote from the target
+  if (player?.votedFor != null) {
+    const target = [...room.players.values()].find(p => p.id === player.votedFor);
+    if (target) target.votesReceived = Math.max(0, target.votesReceived - 1);
+  }
+
   room.players.delete(socketId);
   if (room.players.size === 0) rooms.delete(code);
-  return result;
+  return { code, room };
+}
+
+export function checkAllVoted(code) {
+  const room = rooms.get(code);
+  if (!room || room.status !== 'voting') return false;
+  const players = [...room.players.values()];
+  return players.length > 0 && players.every(p => p.votedFor != null);
 }
 
 export function getRoomPlayers(code) {
